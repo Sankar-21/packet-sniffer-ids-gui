@@ -1,0 +1,112 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
+import threading
+from scapy.all import sniff, IP, TCP, UDP, ICMP
+from sklearn.ensemble import IsolationForest
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import time
+
+class PacketSnifferGUI:
+    def __init__(self, master):
+        self.master = master
+        master.title("Real-time IDS with GUI")
+
+        self.protocol_var = tk.StringVar(value="ALL")
+        self.running = False
+        self.packet_data = []
+        self.packet_sizes = []
+        self.timestamps = []
+
+        self.detector = IsolationForest(contamination=0.1)
+
+        # GUI Setup
+        self.setup_widgets()
+        self.setup_graph()
+
+    def setup_widgets(self):
+        frame = tk.Frame(self.master)
+        frame.pack(pady=5)
+
+        tk.Label(frame, text="Protocol Filter:").pack(side=tk.LEFT)
+        ttk.Combobox(frame, textvariable=self.protocol_var,
+                     values=["ALL", "TCP", "UDP", "ICMP"], width=10).pack(side=tk.LEFT)
+
+        tk.Button(frame, text="Start", command=self.start_sniffer).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame, text="Stop", command=self.stop_sniffer).pack(side=tk.LEFT)
+
+        self.output = tk.Text(self.master, height=10, width=80)
+        self.output.pack(pady=5)
+
+    def setup_graph(self):
+        self.fig, self.ax = plt.subplots(figsize=(5, 2.5))
+        self.ax.set_title("Live Packet Size")
+        self.ax.set_xlabel("Time")
+        self.ax.set_ylabel("Size")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.master)
+        self.canvas.get_tk_widget().pack()
+
+    def update_graph(self):
+        self.ax.clear()
+        self.ax.plot(self.timestamps[-50:], self.packet_sizes[-50:], color='green')
+        self.ax.set_title("Live Packet Size")
+        self.ax.set_xlabel("Time")
+        self.ax.set_ylabel("Size")
+        self.canvas.draw()
+
+    def start_sniffer(self):
+        self.running = True
+        self.packet_data = []
+        self.packet_sizes = []
+        self.timestamps = []
+        threading.Thread(target=self.sniff_packets).start()
+
+    def stop_sniffer(self):
+        self.running = False
+
+    def sniff_packets(self):
+        sniff(prn=self.process_packet, store=False)
+
+    def process_packet(self, packet):
+        if not self.running:
+            return
+        if packet.haslayer(IP):
+            if self.protocol_var.get() == "TCP" and not packet.haslayer(TCP):
+                return
+            elif self.protocol_var.get() == "UDP" and not packet.haslayer(UDP):
+                return
+            elif self.protocol_var.get() == "ICMP" and not packet.haslayer(ICMP):
+                return
+
+            src = packet[IP].src
+            dst = packet[IP].dst
+            size = len(packet)
+
+            timestamp = time.strftime("%H:%M:%S")
+            self.packet_sizes.append(size)
+            self.timestamps.append(timestamp)
+
+            self.output.insert(tk.END, f"[{timestamp}] {src} -> {dst} | Size: {size}\n")
+            self.output.see(tk.END)
+
+            with open("packet_log.txt", "a") as log:
+                log.write(f"{timestamp},{src},{dst},{size}\n")
+
+            self.packet_data.append([size])
+            if len(self.packet_data) > 20:
+                recent_data = np.array(self.packet_data[-20:])
+                self.detector.fit(recent_data)
+                pred = self.detector.predict([self.packet_data[-1]])
+                if pred[0] == -1:
+                    self.alert_user(src, dst)
+
+            self.update_graph()
+
+    def alert_user(self, src, dst):
+        messagebox.showwarning("Intrusion Detected", f"Suspicious packet!\nFrom: {src}\nTo: {dst}")
+
+# Run GUI
+root = tk.Tk()
+app = PacketSnifferGUI(root)
+root.mainloop()
