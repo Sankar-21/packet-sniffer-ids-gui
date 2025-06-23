@@ -17,7 +17,8 @@ A real-time **Intrusion Detection System (IDS)** built using **Python**, featuri
 
 ## 🖥 GUI Preview
 
-> Screenshot coming soon...
+![image](https://github.com/user-attachments/assets/3117ced8-2a4f-4cca-ad0a-a8bf02f09348)
+
 
 ---
 
